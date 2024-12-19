@@ -19,6 +19,16 @@ class Individual
     {
         Genes = new bool[numberOfItems];
     }
+
+    public Individual(bool[] items)
+    {
+        Genes = new bool[items.Length];
+
+        for (int k = 0; k < items.Length; k++)
+        {
+            Genes[k] = items[k];
+        }
+    }
 }
 
 class GenMethod
@@ -38,85 +48,118 @@ class GenMethod
         MutationRate = mutRate;
     }
 
-    public List<Individual> InitializePopulation(int numberOfItems, List<Item> items)
+    public List<Individual> InitializePopulation(List<Item> items)
     {
         var population = new List<Individual>();
 
         for (int i = 0; i < PopulationSize; i++)
         {
-            var individual = new Individual(numberOfItems);
-            int totalWeight = 0;
-
-            var randomItems = items.OrderBy(x => random.Next()).ToList();
-
-            foreach (var item in randomItems)
-            {
-                if (totalWeight + item.Weight <= Common.Capacity)
-                {
-                    individual.Genes[items.IndexOf(item)] = true;
-                    totalWeight += item.Weight;
-                }
-            }
-
+            var individual = new Individual(Common.NumberOfItems);
+            individual.Genes[random.Next(Common.NumberOfItems)] = true;
+            individual.Quality = CalculateQuality(individual, items);
             population.Add(individual);
         }
+
         return population;
     }
 
-    public void EvaluateQuality(Individual individual, List<Item> items)
+    private int CalculateQuality(Individual individual, List<Item> items)
     {
         int totalValue = 0;
-        int totalWeight = 0;
 
-        for (int i = 0; i < items.Count; i++)
+        for (int i = 0; i < Common.NumberOfItems; i++)
         {
             if (individual.Genes[i])
             {
                 totalValue += items[i].Value;
+            }
+        }
+
+        return totalValue;
+    }
+
+
+    public bool IsDead(Individual individual, List<Item> items)
+    {
+        int totalWeight = 0;
+
+        for (int i = 0; i < individual.Genes.Length; i++)
+        {
+            if (individual.Genes[i])
+            {
                 totalWeight += items[i].Weight;
             }
         }
 
-        if (totalWeight > Common.Capacity)
-        {
-            individual.Quality = 0;
-        }
-        else
-        {
-            individual.Quality = totalValue;
-        }
+        return totalWeight > Common.Capacity;
     }
 
-    public void Crossover(Individual parent1, Individual parent2, out Individual offspring1, out Individual offspring2)
+    public void Crossover(Individual parent1, Individual parent2, out Individual offspring, List<Item> items)
     {
-        offspring1 = new Individual(Common.NumberOfItems);
-        offspring2 = new Individual(Common.NumberOfItems);
+        offspring = new Individual(Common.NumberOfItems);
 
         int point1 = random.Next(Common.NumberOfItems);
         int point2 = random.Next(point1, Common.NumberOfItems);
         int point3 = random.Next(point2, Common.NumberOfItems);
 
-        for (int i = 0; i < Common.NumberOfItems; i++)
+        bool swapSegment1 = random.Next(2) == 0;
+        bool swapSegment2 = random.Next(2) == 0;
+        bool swapSegment3 = random.Next(2) == 0;
+        bool swapSegment4 = random.Next(2) == 0;
+
+        int count = 0;
+
+        do
         {
-            if (i < point1 || (i >= point2 && i < point3))
+            for (int i = 0; i < Common.NumberOfItems; i++)
             {
-                offspring1.Genes[i] = parent1.Genes[i];
-                offspring2.Genes[i] = parent2.Genes[i];
+                if (i < point1)
+                {
+                    offspring.Genes[i] = swapSegment1 ? parent2.Genes[i] : parent1.Genes[i];
+                }
+                else if (i >= point1 && i < point2)
+                {
+                    offspring.Genes[i] = swapSegment2 ? parent2.Genes[i] : parent1.Genes[i];
+                }
+                else if (i >= point2 && i < point3)
+                {
+                    offspring.Genes[i] = swapSegment3 ? parent2.Genes[i] : parent1.Genes[i];
+                }
+                else
+                {
+                    offspring.Genes[i] = swapSegment4 ? parent2.Genes[i] : parent1.Genes[i];
+                }
             }
-            else
-            {
-                offspring1.Genes[i] = parent2.Genes[i];
-                offspring2.Genes[i] = parent1.Genes[i];
-            }
+            count++;
+        } while (IsDead(offspring, items) && count < 4);
+
+
+        //Console.WriteLine("CROSSOVER");
+        //Console.WriteLine(string.Join(", ", offspring.Genes.Select(x => x ? 1 : 0)));
+        offspring.Quality = CalculateQuality(offspring, items);
+
+        if (IsDead(offspring, items) || offspring.Quality == 0)
+        {
+            offspring.Quality = 0;
         }
     }
 
-    public void Mutate(Individual individual)
+    public void Mutate(Individual individual, List<Item> items)
     {
         if (random.NextDouble() < MutationRate)
         {
+            Individual tempInd;
+
+            tempInd = new Individual(individual.Genes);
             int geneToMutate = random.Next(Common.NumberOfItems);
-            individual.Genes[geneToMutate] = !individual.Genes[geneToMutate];
+            tempInd.Genes[geneToMutate] = !tempInd.Genes[geneToMutate];
+
+            individual.Quality = CalculateQuality(individual, items);
+
+            if (IsDead(tempInd, items))
+            {
+                Array.Copy(tempInd.Genes, individual.Genes, individual.Genes.Length);
+            }
         }
     }
 
@@ -138,9 +181,8 @@ class GenMethod
             }
             else
             {
-                double bestValuePerWeight = (double)items[i].Value / items[i].Weight;
                 int bestItemIndex = i;
-                double bestItemValuePerWeight = bestValuePerWeight;
+                double bestItemValuePerWeight = (double)items[i].Value / items[i].Weight;
 
                 int weightWithoutCurrentItem = totalWeight - items[i].Weight;
 
@@ -174,103 +216,78 @@ class GenMethod
         }
     }
 
-    //public Individual RouletteSelection(List<Individual> population)
-    //{
-    //    int totalQuality = population.Sum(ind => ind.Quality);
-    //    double pick = random.NextDouble() * totalQuality;
+    public Individual RouletteSelection(List<Individual> population)
+    {
+        int totalQuality = population.Sum(ind => ind.Quality);
 
-    //    var probabilities = population.Select(ind => (double)ind.Quality / totalQuality).ToList();
+        var probabilities = population.Select(ind => (double)ind.Quality / totalQuality).ToList();
 
-    //    double randomValue = random.NextDouble();
+        double randomValue = random.NextDouble();
 
-    //    double cumulativeProbability = 0.0;
-    //    for (int i = 0; i < population.Count; i++)
-    //    {
-    //        cumulativeProbability += probabilities[i];
-    //        if (randomValue < cumulativeProbability)
-    //        {
-    //            return population[i];
-    //        }
-    //    }
-    //    return population.Last();
-    //}
-
-    //public Individual TournamentSelection(List<Individual> population, int tournamentSize)
-    //{
-    //    var tournament = new List<Individual>();
-    //    for (int i = 0; i < tournamentSize; i++)
-    //    {
-    //        var randomIndividual = population[random.Next(population.Count)];
-    //        tournament.Add(randomIndividual);
-    //    }
-    //    return tournament.OrderByDescending(ind => ind.Quality).First();
-    //}
-
+        double cumulativeProbability = 0.0;
+        for (int i = 0; i < population.Count; i++)
+        {
+            cumulativeProbability += probabilities[i];
+            if (randomValue < cumulativeProbability)
+            {
+                return population[i];
+            }
+        }
+        return population.Last();
+    }
 
     public void SolveProblem(ref List<Individual> population, List<Item> items)
     {
+        foreach (var individual in population)
+        {
+            individual.Quality = CalculateQuality(individual, items);
+        }
+
         for (int generation = 1; generation <= Generations; generation++)
         {
-            foreach (var individual in population)
+            Individual parent1 = RouletteSelection(population);
+            Individual parent2 = RouletteSelection(population);
+
+            //Individual parent1 = population[random.Next(PopulationSize)];
+            //Individual parent2 = population[random.Next(PopulationSize)];
+
+            //Individual parent1 = TournamentSelection(population, 5);
+            //Individual parent2 = TournamentSelection(population, 5);
+
+            //int numberRandItems = 10;
+            //Individual[] tempBestInd = new Individual[numberRandItems];
+            //for (int j = 0; j < numberRandItems; j++)
+            //{
+            //    tempBestInd[j] = population.OrderByDescending(ind => ind.Quality).ToArray()[j];
+            //}
+
+            //Individual parent1 = population[random.Next(PopulationSize)];
+            //Individual parent2 = tempBestInd[random.Next(numberRandItems)];
+
+            Individual offspring = new Individual(Common.NumberOfItems);
+            if (random.NextDouble() < CrossoverRate)
             {
-                EvaluateQuality(individual, items);
-            }
+                Crossover(parent1, parent2, out offspring, items);
 
-            population = population.OrderByDescending(ind => ind.Quality).ToList();
-            List<Individual> newPopulation = new List<Individual>();
+                Mutate(offspring, items);
 
-            for (int i = 0; i < PopulationSize / 2; i++)
-            {
-                //Individual parent1 = RouletteSelection(population);
-                //Individual parent2 = RouletteSelection(population);
-
-                //Individual parent1 = population[random.Next(PopulationSize)];
-                //Individual parent2 = population[random.Next(PopulationSize)];
-
-                //Individual parent1 = TournamentSelection(population, 3);
-                //Individual parent2 = TournamentSelection(population, 3);
-
-                int numberRandItems = 10;
-                Individual[] tempBestInd = new Individual[numberRandItems];
-                for (int j = 0; j < numberRandItems; j++)
+                if (generation > 200)
                 {
-                    tempBestInd[j] = population.OrderByDescending(ind => ind.Quality).ToArray()[j];
+                    LocalImprovement(offspring, items);
                 }
 
-                Individual parent1 = population[random.Next(PopulationSize)];
-                Individual parent2 = tempBestInd[random.Next(numberRandItems)];
-
-                if (random.NextDouble() < CrossoverRate)
+                var worst = population.OrderBy(ind => ind.Quality).First();
+                if (offspring.Quality > worst.Quality)
                 {
-                    Individual offspring1, offspring2;
-                    Crossover(parent1, parent2, out offspring1, out offspring2);
-
-                    Mutate(offspring1);
-                    Mutate(offspring2);
-                    LocalImprovement(offspring1, items);
-                    LocalImprovement(offspring2, items);
-
-                    newPopulation.Add(offspring1);
-                    newPopulation.Add(offspring2);
-                }
-                else
-                {
-                    // Емпірично підвищило вдвічі ефективність, відходить від біологічного принципу
-                    Mutate(parent1);
-                    Mutate(parent2);
-                    LocalImprovement(parent1, items);
-                    LocalImprovement(parent2, items);
-
-                    newPopulation.Add(parent1);
-                    newPopulation.Add(parent2);
+                    population.Remove(worst);
+                    population.Add(offspring);
                 }
             }
-            population = newPopulation;
 
             if (generation % 10 == 0)
             {
                 Individual bestIndividual = population.OrderByDescending(ind => ind.Quality).First();
-                Console.WriteLine($"Generation {generation} - Best Fitness: {bestIndividual.Quality}");
+                Console.WriteLine($"Generation {generation} - Best Quality: {bestIndividual.Quality}");
             }
         }
     }
@@ -304,7 +321,7 @@ class Program
         GenMethod gm = new GenMethod(populationSize, generations, crossoverRate, mutationRate);
 
         List<Item> items = GenerateItems();
-        List<Individual> population = gm.InitializePopulation(Common.NumberOfItems, items);
+        List<Individual> population = gm.InitializePopulation(items);
 
         gm.SolveProblem(ref population, items);
 
